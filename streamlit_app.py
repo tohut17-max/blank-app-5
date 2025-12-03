@@ -1,89 +1,115 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 st.set_page_config(page_title="연령대별 독서량 분석", layout="wide")
-st.title("📚 연령대별 독서량 분석 대시보드")
+st.title("📚 연령대별 독서량 분석 (2025년 기준)")
 
-# ---------------------------------------
-# 1) 파일 업로드
-# ---------------------------------------
-uploaded = st.file_uploader("CSV 파일을 업로드하세요", type=["csv"])
+uploaded_file = st.file_uploader("CSV 파일을 업로드하세요", type=["csv"])
 
-if uploaded is not None:
-    df = pd.read_csv(uploaded, encoding="utf-8")
+if uploaded_file is None:
+    st.info("CSV 파일을 업로드하면 분석을 시작할 수 있어요.")
+    st.stop()
 
-    # 컬럼명 정리
-    df = df.rename(columns={df.columns[0]: "구분1", df.columns[1]: "연령대"})
+# 1. CSV 로드
+df = pd.read_csv(uploaded_file, encoding="utf-8", engine="python")
 
-    # 연령대만 선택
-    age_df = df[df["구분1"].str.contains("연령", na=False)].copy()
+# 2. 연령대 행만 필터
+age_df = df[(df["특성별(1)"] == "연령")].copy()
 
-    # Tidy 변환
-    tidy = age_df.melt(
-        id_vars="연령대",
-        var_name="year",
-        value_name="read_amount"
+# 3. 컬럼명 확인
+st.subheader("데이터 미리보기")
+st.dataframe(age_df.head(), use_container_width=True)
+
+# 핵심 컬럼 정리
+# 총독서량 = "2025"
+# 독서인구 1인당 평균 독서권수 = "2025.1"
+# 종이책 = "2025.2"
+# 전자책 = "2025.3"
+
+# -----------------------
+# 탭 구성
+# -----------------------
+tab1, tab2, tab3, tab4 = st.tabs([
+    "총독서량 비교",
+    "종이책·전자책 비교",
+    "세부 항목 히트맵",
+    "연령대별 상세 보기"
+])
+
+# -----------------------
+# 1) 총독서량 비교
+# -----------------------
+with tab1:
+    st.header("📌 연령대별 총독서량 비교 (2025)")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    sns.barplot(
+        data=age_df,
+        x="특성별(2)",
+        y="2025",
+        ax=ax
+    )
+    ax.set_ylabel("총 독서량")
+    ax.set_xlabel("연령대")
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+
+# -----------------------
+# 2) 종이책·전자책 비교
+# -----------------------
+with tab2:
+    st.header("📌 종이책 vs 전자책 독서량 비교 (2025)")
+    
+    melted = age_df.melt(
+        id_vars="특성별(2)",
+        value_vars=["2025.2", "2025.3"],
+        var_name="type",
+        value_name="amount"
     )
 
-    tidy = tidy[tidy["read_amount"] != "-"]
-    tidy["read_amount"] = tidy["read_amount"].astype(float)
+    type_map = {
+        "2025.2": "종이책",
+        "2025.3": "전자책"
+    }
+    melted["type"] = melted["type"].map(type_map)
 
-    # ---------------------------------------
-    # 2) 사이드바 필터 UI
-    # ---------------------------------------
-    st.sidebar.header("🔎 데이터 필터")
-
-    # 연도 리스트
-    years = sorted(tidy["year"].unique())
-
-    # 연도 멀티 선택
-    selected_years = st.sidebar.multiselect(
-        "연도 선택",
-        options=years,
-        default=years  # 기본값: 전체 연도
+    fig, ax = plt.subplots(figsize=(10, 4))
+    sns.barplot(
+        data=melted,
+        x="특성별(2)",
+        y="amount",
+        hue="type",
+        ax=ax
     )
+    ax.set_xlabel("연령대")
+    ax.set_ylabel("독서량")
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
 
-    # 연령대 리스트
-    age_groups = sorted(tidy["연령대"].unique())
+# -----------------------
+# 3) 히트맵 분석
+# -----------------------
+with tab3:
+    st.header("📌 연령대 × 독서 항목 히트맵")
 
-    selected_ages = st.sidebar.multiselect(
-        "연령대 선택",
-        options=age_groups,
-        default=age_groups  # 기본값: 전체 연령대
-    )
+    # 숫자형 컬럼만 선택
+    num_cols = [col for col in age_df.columns if "2025" in col]
 
-    # 필터 적용
-    filtered = tidy[
-        tidy["year"].isin(selected_years) &
-        tidy["연령대"].isin(selected_ages)
-    ]
+    heat_df = age_df.set_index("특성별(2)")[num_cols]
 
-    # ---------------------------------------
-    # 3) 데이터 미리보기
-    # ---------------------------------------
-    st.subheader("🔍 필터링된 데이터 미리보기")
-    st.dataframe(filtered)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.heatmap(heat_df, annot=True, fmt=".1f", cmap="Blues")
+    st.pyplot(fig)
 
-    # ---------------------------------------
-    # 4) Altair 라인 차트 (인터랙티브)
-    # ---------------------------------------
-    st.subheader("📈 연령대별 독서량 변화 추이")
+# -----------------------
+# 4) 특정 연령대 상세 보기
+# -----------------------
+with tab4:
+    st.header("📌 연령대별 상세 보기")
 
-    chart = (
-        alt.Chart(filtered)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("year:N", title="연도"),
-            y=alt.Y("read_amount:Q", title="독서량"),
-            color="연령대:N",
-            tooltip=["연령대", "year", "read_amount"]
-        )
-        .properties(width=900, height=450)
-        .interactive()
-    )
+    selected_age = st.selectbox("연령대를 선택하세요", age_df["특성별(2)"].unique())
 
-    st.altair_chart(chart, use_container_width=True)
-
-else:
-    st.info("CSV 파일을 업로드하면 그래프가 생성됩니다.")
+    detail = age_df[age_df["특성별(2)"] == selected_age].T
+    st.subheader(f"▶ {selected_age} 상세 데이터")
+    st.dataframe(detail, use_container_width=True)
